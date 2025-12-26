@@ -622,8 +622,7 @@ function performInteract() {
             slot.id = 0;
             slot.count = 0;
           }
-          updateHotbarUI();
-          if (isInventoryOpen) updateInventoryUI();
+          refreshInventoryUI();
         }
       }
   }
@@ -734,10 +733,8 @@ function animate() {
         if (targetSlot === inventorySlots[selectedSlot]) {
             onHotbarChange();
         } else {
-            updateHotbarUI();
+            refreshInventoryUI();
         }
-        
-        if (isInventoryOpen) updateInventoryUI();
       }
     }
   }
