@@ -152,6 +152,7 @@ const BLOCK_NAMES: Record<number, string> = {
 const inventorySlots = Array.from({ length: 36 }, () => ({ id: 0, count: 0 }));
 let selectedSlot = 0;
 let isInventoryOpen = false;
+let touchStartSlotIndex: number | null = null;
 
 // Drag and Drop State
 let draggedItem: { id: number, count: number } | null = null;
@@ -198,52 +199,47 @@ function showHotbarLabel(text: string) {
   }, 2000);
 }
 
-function createSlotElement(slot: { id: number, count: number }, index: number, isHotbar: boolean) {
+function initSlotElement(index: number, isHotbar: boolean) {
   const div = document.createElement('div');
   div.classList.add('slot');
   div.setAttribute('data-index', index.toString());
-  if (isHotbar && index === selectedSlot) div.classList.add('active');
   
-  if (slot.id !== 0 && slot.count > 0) {
-    const colorDiv = document.createElement('div');
-    colorDiv.classList.add('block-icon');
-    colorDiv.style.backgroundColor = getBlockColor(slot.id);
-    div.appendChild(colorDiv);
+  const icon = document.createElement('div');
+  icon.classList.add('block-icon');
+  icon.style.display = 'none';
+  div.appendChild(icon);
 
-    const countDiv = document.createElement('div');
-    countDiv.classList.add('slot-count');
-    countDiv.innerText = slot.count.toString();
-    div.appendChild(countDiv);
+  const count = document.createElement('div');
+  count.classList.add('slot-count');
+  count.innerText = '';
+  div.appendChild(count);
 
-    // Tooltip Events
-    div.addEventListener('mouseenter', () => {
-      if (isInventoryOpen && slot.id !== 0) {
-        tooltip.innerText = BLOCK_NAMES[slot.id] || 'Блок';
-        tooltip.style.display = 'block';
-      }
-    });
-    
-    div.addEventListener('mousemove', (e) => {
-      if (isInventoryOpen) {
-        tooltip.style.left = (e.clientX + 10) + 'px';
-        tooltip.style.top = (e.clientY + 10) + 'px';
-      }
-    });
+  div.addEventListener('mouseenter', () => {
+    const slot = inventorySlots[index];
+    if (isInventoryOpen && slot.id !== 0) {
+      tooltip.innerText = BLOCK_NAMES[slot.id] || 'Блок';
+      tooltip.style.display = 'block';
+    }
+  });
+  
+  div.addEventListener('mousemove', (e) => {
+    if (isInventoryOpen) {
+      tooltip.style.left = (e.clientX + 10) + 'px';
+      tooltip.style.top = (e.clientY + 10) + 'px';
+    }
+  });
 
-    div.addEventListener('mouseleave', () => {
-      tooltip.style.display = 'none';
-    });
-  }
+  div.addEventListener('mouseleave', () => {
+    tooltip.style.display = 'none';
+  });
 
-  // Click handler for inventory interaction
   div.addEventListener('mousedown', (e) => {
-    e.stopPropagation(); // Prevent game interaction
+    e.stopPropagation();
     if (isInventoryOpen) {
       handleSlotClick(index);
     }
   });
   
-  // Touch handler for mobile
   div.addEventListener('touchstart', (e) => {
     e.stopPropagation();
     if (e.cancelable) e.preventDefault(); 
@@ -267,32 +263,60 @@ function createSlotElement(slot: { id: number, count: number }, index: number, i
   return div;
 }
 
-function updateHotbarUI() {
-  hotbarContainer.innerHTML = '';
-  // Only first 9 slots
-  for (let i = 0; i < 9; i++) {
-    const slotEl = createSlotElement(inventorySlots[i], i, true);
-    hotbarContainer.appendChild(slotEl);
-  }
+function updateSlotVisuals(index: number) {
+  const slot = inventorySlots[index];
+  const elements = document.querySelectorAll(`.slot[data-index="${index}"]`);
+  
+  elements.forEach(el => {
+      if (el.parentElement === hotbarContainer) {
+          if (index === selectedSlot) el.classList.add('active');
+          else el.classList.remove('active');
+      }
+
+      const icon = el.querySelector('.block-icon') as HTMLElement;
+      const countEl = el.querySelector('.slot-count') as HTMLElement;
+
+      if (slot.id !== 0 && slot.count > 0) {
+        icon.style.display = 'block';
+        icon.style.backgroundColor = getBlockColor(slot.id);
+        countEl.innerText = slot.count.toString();
+      } else {
+        icon.style.display = 'none';
+        countEl.innerText = '';
+      }
+  });
 }
 
-function updateInventoryUI() {
+function initInventoryUI() {
+  hotbarContainer.innerHTML = '';
   inventoryGrid.innerHTML = '';
-  // Main Inventory (9-35)
+
+  // Hotbar Container (0-8)
+  for (let i = 0; i < 9; i++) {
+    hotbarContainer.appendChild(initSlotElement(i, true));
+  }
+
+  // Inventory Grid: Main (9-35)
   for (let i = 9; i < 36; i++) {
-    inventoryGrid.appendChild(createSlotElement(inventorySlots[i], i, false));
+    inventoryGrid.appendChild(initSlotElement(i, false));
   }
   
-  // Separator/Spacer
+  // Separator
   const separator = document.createElement('div');
   separator.className = 'slot-hotbar-separator';
   separator.style.gridColumn = '1 / -1';
   inventoryGrid.appendChild(separator);
 
-  // Hotbar (0-8)
+  // Inventory Grid: Hotbar Copy (0-8)
   for (let i = 0; i < 9; i++) {
-    inventoryGrid.appendChild(createSlotElement(inventorySlots[i], i, false));
+    inventoryGrid.appendChild(initSlotElement(i, false));
   }
+}
+
+function refreshInventoryUI() {
+    for(let i=0; i<36; i++) {
+        updateSlotVisuals(i);
+    }
 }
 
 function toggleInventory() {
@@ -301,14 +325,13 @@ function toggleInventory() {
   if (isInventoryOpen) {
     controls.unlock();
     inventoryMenu.style.display = 'flex';
-    updateInventoryUI();
+    refreshInventoryUI();
   } else {
     controls.lock();
     inventoryMenu.style.display = 'none';
-    tooltip.style.display = 'none'; // Hide tooltip on close
+    tooltip.style.display = 'none'; 
     
     if (draggedItem) {
-      // Put dragged item back
       for (let i = 0; i < 36; i++) {
         if (inventorySlots[i].id === 0) {
           inventorySlots[i] = draggedItem;
@@ -349,8 +372,7 @@ function handleSlotClick(index: number) {
     }
   }
   
-  updateInventoryUI();
-  updateHotbarUI();
+  refreshInventoryUI();
   updateDragIcon();
 }
 
@@ -383,10 +405,34 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 
-updateHotbarUI();
+window.addEventListener('touchmove', (e) => {
+  if (draggedItem && isInventoryOpen) {
+    const touch = e.changedTouches[0];
+    dragIcon.style.left = touch.clientX + 'px';
+    dragIcon.style.top = touch.clientY + 'px';
+  }
+}, { passive: false });
+
+window.addEventListener('touchend', (e) => {
+  if (draggedItem && isInventoryOpen && touchStartSlotIndex !== null) {
+    const touch = e.changedTouches[0];
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    const slotEl = target?.closest('.slot');
+    if (slotEl) {
+      const targetIndex = parseInt(slotEl.getAttribute('data-index') || '-1');
+      if (targetIndex !== -1 && targetIndex !== touchStartSlotIndex) {
+        handleSlotClick(targetIndex);
+      }
+    }
+    touchStartSlotIndex = null;
+  }
+});
+
+initInventoryUI();
+refreshInventoryUI();
 
 function onHotbarChange() {
-  updateHotbarUI();
+  refreshInventoryUI();
   const slot = inventorySlots[selectedSlot];
   if (slot && slot.id !== 0) {
     showHotbarLabel(BLOCK_NAMES[slot.id] || 'Unknown Block');
