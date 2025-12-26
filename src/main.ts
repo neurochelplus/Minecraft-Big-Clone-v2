@@ -201,6 +201,7 @@ function showHotbarLabel(text: string) {
 function createSlotElement(slot: { id: number, count: number }, index: number, isHotbar: boolean) {
   const div = document.createElement('div');
   div.classList.add('slot');
+  div.setAttribute('data-index', index.toString());
   if (isHotbar && index === selectedSlot) div.classList.add('active');
   
   if (slot.id !== 0 && slot.count > 0) {
@@ -242,11 +243,21 @@ function createSlotElement(slot: { id: number, count: number }, index: number, i
     }
   });
   
-  // Touch handler for mobile hotbar selection
+  // Touch handler for mobile
   div.addEventListener('touchstart', (e) => {
     e.stopPropagation();
+    if (e.cancelable) e.preventDefault(); 
+
     if (isInventoryOpen) {
+      touchStartSlotIndex = index;
       handleSlotClick(index);
+      
+      const touch = e.changedTouches[0];
+      if (draggedItem) {
+          dragIcon.style.left = touch.clientX + 'px';
+          dragIcon.style.top = touch.clientY + 'px';
+      }
+      
     } else if (isHotbar) {
       selectedSlot = index;
       onHotbarChange();
