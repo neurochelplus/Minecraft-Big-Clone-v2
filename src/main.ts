@@ -812,29 +812,27 @@ if (isMobile) {
 
   let isDraggingStick = false;
 
+  let joystickTouchId: number | null = null;
+
   
 
   joystickZone.addEventListener('touchstart', (e) => {
 
     e.preventDefault();
 
+    // If already dragging, ignore new touches in zone
+
+    if (isDraggingStick) return;
+
+
+
     const touch = e.changedTouches[0];
 
-    stickStartX = touch.clientX;
-
-    stickStartY = touch.clientY;
-
-    isDraggingStick = true;
+    joystickTouchId = touch.identifier;
 
     
 
-    // Move stick to touch start temporarily for visual feedback? 
-
-    // No, standard is stick stays in center of zone, or zone follows finger. 
-
-    // Let's keep stick in center of zone (relative to zone).
-
-    // Actually, let's just use the zone center as the origin.
+    // Set center based on the zone
 
     const rect = joystickZone.getBoundingClientRect();
 
@@ -848,6 +846,8 @@ if (isMobile) {
 
     stickStartY = centerY;
 
+    isDraggingStick = true;
+
   });
 
 
@@ -856,9 +856,29 @@ if (isMobile) {
 
     e.preventDefault();
 
-    if (!isDraggingStick) return;
+    if (!isDraggingStick || joystickTouchId === null) return;
 
-    const touch = e.changedTouches[0];
+    
+
+    // Find the specific touch for the joystick
+
+    let touch: Touch | undefined;
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+
+        if (e.changedTouches[i].identifier === joystickTouchId) {
+
+            touch = e.changedTouches[i];
+
+            break;
+
+        }
+
+    }
+
+    
+
+    if (!touch) return; // The moving touch is not the joystick one
 
     
 
@@ -892,11 +912,7 @@ if (isMobile) {
 
     // Update movement flags
 
-    // Thresholds
-
     const threshold = 10;
-
-    
 
     moveForward = dy < -threshold;
 
@@ -910,19 +926,47 @@ if (isMobile) {
 
 
 
-  const resetStick = () => {
+  const resetStick = (e: TouchEvent) => {
 
-    isDraggingStick = false;
+    if (!isDraggingStick || joystickTouchId === null) return;
 
-    joystickStick.style.transform = `translate(-50%, -50%)`;
 
-    moveForward = false;
 
-    moveBackward = false;
+    // Check if the ending touch is the joystick touch
 
-    moveLeft = false;
+    let touchFound = false;
 
-    moveRight = false;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+
+        if (e.changedTouches[i].identifier === joystickTouchId) {
+
+            touchFound = true;
+
+            break;
+
+        }
+
+    }
+
+
+
+    if (touchFound) {
+
+        isDraggingStick = false;
+
+        joystickTouchId = null;
+
+        joystickStick.style.transform = `translate(-50%, -50%)`;
+
+        moveForward = false;
+
+        moveBackward = false;
+
+        moveLeft = false;
+
+        moveRight = false;
+
+    }
 
   };
 
@@ -988,19 +1032,15 @@ if (isMobile) {
 
   let lastLookY = 0;
 
+  let lookTouchId: number | null = null;
+
   
 
   document.addEventListener('touchstart', (e) => {
 
-    // Only if not on a UI element that stops propagation
+    if (lookTouchId !== null) return; // Already looking with a finger
 
-    // But we need to filter explicitly or ensure UI elements stop prop.
 
-    // The joystick and buttons stop prop or prevent default.
-
-    // However, the event might bubble.
-
-    // Check target.
 
     const target = e.target as HTMLElement;
 
@@ -1009,6 +1049,8 @@ if (isMobile) {
     
 
     const touch = e.changedTouches[0];
+
+    lookTouchId = touch.identifier;
 
     lastLookX = touch.clientX;
 
@@ -1020,13 +1062,37 @@ if (isMobile) {
 
   document.addEventListener('touchmove', (e) => {
 
+    if (lookTouchId === null) return;
+
+    
+
      const target = e.target as HTMLElement;
 
     if (target.closest('#joystick-zone') || target.closest('.mob-btn') || target.closest('#inventory-menu') || target.closest('#hotbar')) return;
 
 
 
-    const touch = e.changedTouches[0];
+    // Find the look touch
+
+    let touch: Touch | undefined;
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+
+        if (e.changedTouches[i].identifier === lookTouchId) {
+
+            touch = e.changedTouches[i];
+
+            break;
+
+        }
+
+    }
+
+    
+
+    if (!touch) return;
+
+
 
     const dx = touch.clientX - lastLookX;
 
@@ -1046,21 +1112,41 @@ if (isMobile) {
 
     
 
-    // Rotate Camera
-
-    // Yaw (Y axis) - rotates the player body (controls.object)
-
     controls.object.rotation.y -= dx * SENSITIVITY;
-
-    
-
-    // Pitch (X axis) - rotates the camera
 
     camera.rotation.x -= dy * SENSITIVITY;
 
     camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
 
   });
+
+
+
+  const endLook = (e: TouchEvent) => {
+
+    if (lookTouchId === null) return;
+
+    
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+
+        if (e.changedTouches[i].identifier === lookTouchId) {
+
+            lookTouchId = null;
+
+            break;
+
+        }
+
+    }
+
+  };
+
+
+
+  document.addEventListener('touchend', endLook);
+
+  document.addEventListener('touchcancel', endLook);
 
 
 
@@ -1072,31 +1158,19 @@ if (isMobile) {
 
   
 
-    btnStart.addEventListener('touchstart', () => {
+  btnStart.addEventListener('touchstart', () => {
 
-  
+    isMobileGameStarted = true;
 
-      isMobileGameStarted = true;
+    document.documentElement.requestFullscreen().catch(err => {
 
-  
-
-      document.documentElement.requestFullscreen().catch(err => {
-
-  
-
-          console.log("Fullscreen denied", err);
-
-  
-
-      });
-
-  
-
-      fsPrompt.style.display = 'none';
-
-  
+        console.log("Fullscreen denied", err);
 
     });
+
+    fsPrompt.style.display = 'none';
+
+  });
 
 }
 
