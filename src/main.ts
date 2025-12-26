@@ -16,8 +16,11 @@ scene.background = new THREE.Color(0x87ceeb); // Sky blue
 scene.fog = new THREE.Fog(0x87ceeb, 10, 50);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.rotation.order = 'YXZ';
 camera.position.set(8, 20, 20);
 camera.lookAt(8, 8, 8);
+
+let isMobileGameStarted = false;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -686,7 +689,7 @@ function animate() {
   mobManager.update(delta, controls.object.position, takeDamage);
 
   // Cursor Update
-  if (controls.isLocked) {
+  if (controls.isLocked || isMobileGameStarted) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     const intersects = raycaster.intersectObjects(scene.children);
     const hit = intersects.find(i => i.object !== cursorMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
@@ -704,7 +707,7 @@ function animate() {
     }
   }
   
-  if (controls.isLocked) {
+  if (controls.isLocked || isMobileGameStarted) {
     // Input Vector (Local)
     const inputX = Number(moveRight) - Number(moveLeft);
     const inputZ = Number(moveForward) - Number(moveBackward);
@@ -1069,17 +1072,31 @@ if (isMobile) {
 
   
 
-  btnStart.addEventListener('touchstart', () => {
+    btnStart.addEventListener('touchstart', () => {
 
-    document.documentElement.requestFullscreen().catch(err => {
+  
 
-        console.log("Fullscreen denied", err);
+      isMobileGameStarted = true;
+
+  
+
+      document.documentElement.requestFullscreen().catch(err => {
+
+  
+
+          console.log("Fullscreen denied", err);
+
+  
+
+      });
+
+  
+
+      fsPrompt.style.display = 'none';
+
+  
 
     });
-
-    fsPrompt.style.display = 'none';
-
-  });
 
 }
 

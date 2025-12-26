@@ -198,7 +198,7 @@ canvas {
   }
   
   /* Hide standard PC overlay on mobile if needed */
-  .is-mobile #instructions {
+  .is-mobile #blocker, .is-mobile #instructions {
     display: none !important;
   }
   
