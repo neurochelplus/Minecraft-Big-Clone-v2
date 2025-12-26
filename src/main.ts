@@ -1044,7 +1044,7 @@ if (isMobile) {
 
     const target = e.target as HTMLElement;
 
-    if (target.closest('#joystick-zone') || target.closest('.mob-btn') || target.closest('#inventory-menu') || target.closest('#hotbar')) return;
+    if (target.closest('#joystick-zone') || target.closest('.mob-btn') || target.closest('#inventory-menu') || target.closest('#hotbar') || target.closest('#btn-inv')) return;
 
     
 
@@ -1068,7 +1068,7 @@ if (isMobile) {
 
      const target = e.target as HTMLElement;
 
-    if (target.closest('#joystick-zone') || target.closest('.mob-btn') || target.closest('#inventory-menu') || target.closest('#hotbar')) return;
+    if (target.closest('#joystick-zone') || target.closest('.mob-btn') || target.closest('#inventory-menu') || target.closest('#hotbar') || target.closest('#btn-inv')) return;
 
 
 
