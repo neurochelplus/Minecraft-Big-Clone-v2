@@ -221,6 +221,13 @@ export class World {
       this.generateChunk(cx, cz);
   }
 
+  public isChunkLoaded(x: number, z: number): boolean {
+    const cx = Math.floor(x / this.chunkSize);
+    const cz = Math.floor(z / this.chunkSize);
+    const key = `${cx},${cz}`;
+    return this.chunksData.has(key);
+  }
+
   public hasBlock(x: number, y: number, z: number): boolean {
     const cx = Math.floor(x / this.chunkSize);
     const cz = Math.floor(z / this.chunkSize);

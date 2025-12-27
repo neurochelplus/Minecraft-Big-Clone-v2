@@ -768,6 +768,15 @@ function animate() {
   }
   
   if (controls.isLocked || isMobileGameStarted) {
+    // Safety: Don't apply physics if the current chunk isn't loaded yet
+    // This prevents falling through the world upon load/teleport
+    if (!world.isChunkLoaded(controls.object.position.x, controls.object.position.z)) {
+         // Still update entities/mobs even if player is frozen, but skip player physics
+         // Actually, if we return here, we skip player movement code below.
+         // We rely on the global world.update() at start of animate() to keep loading chunks.
+        return; 
+    }
+
     // Input Vector (Local)
     const inputX = Number(moveRight) - Number(moveLeft);
     const inputZ = Number(moveForward) - Number(moveBackward);
