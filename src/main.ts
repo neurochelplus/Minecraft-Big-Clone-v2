@@ -327,9 +327,15 @@ function toggleInventory() {
     inventoryMenu.style.display = 'flex';
     refreshInventoryUI();
   } else {
+    // Auto-save on close
+    world.saveWorld({
+        position: controls.object.position,
+        inventory: inventorySlots
+    });
+
     controls.lock();
     inventoryMenu.style.display = 'none';
-    tooltip.style.display = 'none'; 
+    tooltip.style.display = 'none';  
     
     if (draggedItem) {
       for (let i = 0; i < 36; i++) {
@@ -1230,4 +1236,35 @@ if (isMobile) {
 
 
 
-animate();
+async function initGame() {
+    console.log("Initializing game...");
+    try {
+        const data = await world.loadWorld();
+        if (data.playerPosition) {
+            controls.object.position.copy(data.playerPosition);
+            velocity.set(0, 0, 0); 
+        }
+        if (data.inventory) {
+            for(let i=0; i<36; i++) {
+                if (data.inventory[i]) {
+                    inventorySlots[i] = data.inventory[i];
+                }
+            }
+            refreshInventoryUI();
+        }
+    } catch (e) {
+        console.error("Failed to load world:", e);
+    }
+
+    // Auto-save loop
+    setInterval(() => {
+        world.saveWorld({
+            position: controls.object.position,
+            inventory: inventorySlots
+        });
+    }, 30000);
+
+    animate();
+}
+
+initGame();

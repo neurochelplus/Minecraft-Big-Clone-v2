@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
+import { worldDB } from './DB';
 
 // Block IDs
 const BLOCK = {
@@ -14,14 +15,22 @@ const BLOCK = {
 
 type Chunk = {
   mesh: THREE.Mesh;
-  data: Uint8Array;
+  // Visual mesh only, data is stored in chunksData
 };
 
 export class World {
   private scene: THREE.Scene;
   private chunkSize: number = 16;
   
+  // Visuals
   private chunks: Map<string, Chunk> = new Map();
+  
+  // Data Store
+  public chunksData: Map<string, Uint8Array> = new Map();
+  private dirtyChunks: Set<string> = new Set();
+  private knownChunkKeys: Set<string> = new Set(); // Keys that exist in DB
+  private loadingChunks: Set<string> = new Set(); // Keys currently being fetched from DB
+
   private noise2D = createNoise2D();
   public noiseTexture: THREE.DataTexture;
 
@@ -34,6 +43,99 @@ export class World {
     this.scene = scene;
     this.noiseTexture = this.createNoiseTexture();
   }
+
+  // --- Persistence Methods ---
+
+  public async loadWorld(): Promise<{ playerPosition?: THREE.Vector3, inventory?: any }> {
+    await worldDB.init();
+    
+    // Load meta
+    const meta = await worldDB.get('player', 'meta');
+    
+    // Load all chunk keys so we know what to fetch vs generate
+    const keys = await worldDB.keys('chunks');
+    keys.forEach(k => this.knownChunkKeys.add(k as string));
+
+    console.log(`Loaded world index. ${this.knownChunkKeys.size} chunks in DB.`);
+
+    return meta ? { 
+        playerPosition: new THREE.Vector3(meta.position.x, meta.position.y, meta.position.z),
+        inventory: meta.inventory 
+    } : {};
+  }
+
+  public async saveWorld(playerData: { position: THREE.Vector3, inventory: any }) {
+    console.log('Saving world...');
+    
+    // Save Meta
+    await worldDB.set('player', {
+        position: { x: playerData.position.x, y: playerData.position.y, z: playerData.position.z },
+        inventory: playerData.inventory
+    }, 'meta');
+
+    // Save Dirty Chunks
+    const promises: Promise<void>[] = [];
+    for (const key of this.dirtyChunks) {
+        const data = this.chunksData.get(key);
+        if (data) {
+            promises.push(worldDB.set(key, data, 'chunks'));
+            this.knownChunkKeys.add(key);
+        }
+    }
+    
+    await Promise.all(promises);
+    this.dirtyChunks.clear();
+    console.log('World saved.');
+  }
+
+  private checkMemory(playerPos: THREE.Vector3) {
+      if (this.chunksData.size <= 500) return;
+
+      const cx = Math.floor(playerPos.x / this.chunkSize);
+      const cz = Math.floor(playerPos.z / this.chunkSize);
+
+      // Find furthest chunks
+      const entries = Array.from(this.chunksData.entries());
+      entries.sort((a, b) => {
+          const [ak, ] = a;
+          const [bk, ] = b;
+          const [ax, az] = ak.split(',').map(Number);
+          const [bx, bz] = bk.split(',').map(Number);
+          
+          const distA = (ax - cx) ** 2 + (az - cz) ** 2;
+          const distB = (bx - cx) ** 2 + (bz - cz) ** 2;
+          
+          return distB - distA; // Descending distance
+      });
+
+      // Remove 50 furthest chunks
+      for (let i = 0; i < 50; i++) {
+          if (i >= entries.length) break;
+          const [key, data] = entries[i];
+          
+          // Ensure saved if dirty
+          if (this.dirtyChunks.has(key)) {
+              worldDB.set(key, data, 'chunks').then(() => {
+                  this.knownChunkKeys.add(key);
+              });
+              this.dirtyChunks.delete(key);
+          }
+          
+          this.chunksData.delete(key);
+          
+          // Also remove mesh if exists
+          const chunk = this.chunks.get(key);
+          if (chunk) {
+              this.scene.remove(chunk.mesh);
+              chunk.mesh.geometry.dispose();
+              (chunk.mesh.material as THREE.Material).dispose();
+              this.chunks.delete(key);
+          }
+      }
+      console.log('Memory cleanup performed.');
+  }
+
+  // --- Core Logic ---
 
   private createNoiseTexture(): THREE.DataTexture {
     const size = 16;
@@ -68,12 +170,12 @@ export class World {
         activeChunks.add(key);
 
         if (!this.chunks.has(key)) {
-          this.generateChunk(x, z);
+             this.ensureChunk(x, z, key);
         }
       }
     }
 
-    // Unload far chunks
+    // Unload far visuals (not data yet, just mesh to save draw calls)
     for (const [key, chunk] of this.chunks) {
       if (!activeChunks.has(key)) {
         this.scene.remove(chunk.mesh);
@@ -82,6 +184,41 @@ export class World {
         this.chunks.delete(key);
       }
     }
+
+    // Memory cleanup occasionally
+    if (Math.random() < 0.01) {
+        this.checkMemory(playerPos);
+    }
+  }
+
+  private async ensureChunk(cx: number, cz: number, key: string) {
+      // 1. Check RAM
+      if (this.chunksData.has(key)) {
+          this.buildChunkMesh(cx, cz, this.chunksData.get(key)!);
+          return;
+      }
+
+      // 2. Check DB
+      if (this.knownChunkKeys.has(key)) {
+          if (this.loadingChunks.has(key)) return; // Already loading
+          this.loadingChunks.add(key);
+          
+          worldDB.get(key, 'chunks').then((data: Uint8Array) => {
+              if (data) {
+                  this.chunksData.set(key, data);
+                  this.buildChunkMesh(cx, cz, data);
+              } else {
+                  // Fallback if key existed but data missing?
+                  this.generateChunk(cx, cz);
+              }
+          }).finally(() => {
+              this.loadingChunks.delete(key);
+          });
+          return;
+      }
+
+      // 3. Generate New
+      this.generateChunk(cx, cz);
   }
 
   public hasBlock(x: number, y: number, z: number): boolean {
@@ -89,18 +226,18 @@ export class World {
     const cz = Math.floor(z / this.chunkSize);
     const key = `${cx},${cz}`;
 
-    const chunk = this.chunks.get(key);
-    if (!chunk) return false;
+    const data = this.chunksData.get(key);
+    if (!data) return false;
 
     // Convert to local chunk coordinates
     const localX = x - cx * this.chunkSize;
     const localZ = z - cz * this.chunkSize;
-    const localY = y; // y is not chunked vertically yet
+    const localY = y; 
 
     if (localY < 0 || localY >= this.chunkSize) return false;
 
     const index = this.getBlockIndex(localX, localY, localZ);
-    return chunk.data[index] !== BLOCK.AIR;
+    return data[index] !== BLOCK.AIR;
   }
 
   public getBlock(x: number, y: number, z: number): number {
@@ -108,8 +245,8 @@ export class World {
     const cz = Math.floor(z / this.chunkSize);
     const key = `${cx},${cz}`;
 
-    const chunk = this.chunks.get(key);
-    if (!chunk) return 0; // AIR
+    const data = this.chunksData.get(key);
+    if (!data) return 0; // AIR
 
     const localX = x - cx * this.chunkSize;
     const localZ = z - cz * this.chunkSize;
@@ -118,7 +255,7 @@ export class World {
     if (localY < 0 || localY >= this.chunkSize) return 0;
 
     const index = this.getBlockIndex(localX, localY, localZ);
-    return chunk.data[index];
+    return data[index];
   }
 
   public setBlock(x: number, y: number, z: number, type: number) {
@@ -126,8 +263,8 @@ export class World {
     const cz = Math.floor(z / this.chunkSize);
     const key = `${cx},${cz}`;
 
-    const chunk = this.chunks.get(key);
-    if (!chunk) return;
+    const data = this.chunksData.get(key);
+    if (!data) return;
 
     const localX = x - cx * this.chunkSize;
     const localZ = z - cz * this.chunkSize;
@@ -136,16 +273,20 @@ export class World {
     if (localY < 0 || localY >= this.chunkSize) return;
 
     const index = this.getBlockIndex(localX, localY, localZ);
-    chunk.data[index] = type;
+    data[index] = type;
+    this.dirtyChunks.add(key); // Mark for save
 
     // Regenerate mesh
-    this.scene.remove(chunk.mesh);
-    chunk.mesh.geometry.dispose();
-    (chunk.mesh.material as THREE.Material).dispose();
+    const chunk = this.chunks.get(key);
+    if (chunk) {
+        this.scene.remove(chunk.mesh);
+        chunk.mesh.geometry.dispose();
+        (chunk.mesh.material as THREE.Material).dispose();
+    }
 
-    const newMesh = this.generateChunkMesh(chunk.data, cx, cz);
+    const newMesh = this.generateChunkMesh(data, cx, cz);
     this.scene.add(newMesh);
-    chunk.mesh = newMesh;
+    this.chunks.set(key, { mesh: newMesh });
   }
 
   private getBlockIndex(x: number, y: number, z: number): number {
@@ -186,6 +327,7 @@ export class World {
   }
 
   private generateChunk(cx: number, cz: number) {
+    const key = `${cx},${cz}`;
     const data = new Uint8Array(this.chunkSize * this.chunkSize * this.chunkSize);
     const startX = cx * this.chunkSize;
     const startZ = cz * this.chunkSize;
@@ -237,10 +379,21 @@ export class World {
       }
     }
 
+    // Save to Global Store
+    this.chunksData.set(key, data);
+    this.dirtyChunks.add(key); // New chunk = needs save
+
     // 3. Generate Mesh
-    const mesh = this.generateChunkMesh(data, cx, cz);
-    this.scene.add(mesh);
-    this.chunks.set(`${cx},${cz}`, { mesh, data });
+    this.buildChunkMesh(cx, cz, data);
+  }
+
+  private buildChunkMesh(cx: number, cz: number, data: Uint8Array) {
+      const key = `${cx},${cz}`;
+      if (this.chunks.has(key)) return; // Already has mesh
+
+      const mesh = this.generateChunkMesh(data, cx, cz);
+      this.scene.add(mesh);
+      this.chunks.set(key, { mesh });
   }
 
   private generateChunkMesh(data: Uint8Array, cx: number, cz: number): THREE.Mesh {
