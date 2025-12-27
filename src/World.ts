@@ -187,19 +187,35 @@ export class World {
   // --- Core Logic ---
 
   private createNoiseTexture(): THREE.DataTexture {
-    const size = 16;
-    const data = new Uint8Array(size * size * 4); // RGBA
+    const width = 32;
+    const height = 16;
+    const data = new Uint8Array(width * height * 4); // RGBA
 
-    for (let i = 0; i < size * size; i++) {
+    for (let i = 0; i < width * height; i++) {
       const stride = i * 4;
+      const x = i % width;
+      
       const v = Math.floor(Math.random() * (255 - 150) + 150); // 150-255
       data[stride] = v;     // R
       data[stride + 1] = v; // G
       data[stride + 2] = v; // B
-      data[stride + 3] = 255; // Alpha
+
+      // Alpha logic
+      if (x >= 16) {
+          // Right half: Leaves with transparency
+          // Simple noise for transparency: random dots
+          if (Math.random() < 0.4) {
+             data[stride + 3] = 0;
+          } else {
+             data[stride + 3] = 255;
+          }
+      } else {
+          // Left half: Solid
+          data[stride + 3] = 255;
+      }
     }
 
-    const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
     texture.minFilter = THREE.NearestFilter;
     texture.magFilter = THREE.NearestFilter;
     texture.needsUpdate = true;
@@ -361,11 +377,26 @@ export class World {
       }
     }
 
-    // Leaves
+    // Leaves (Volumetric)
     const leavesStart = startY + trunkHeight - 2;
-    for (let x = startX - 2; x <= startX + 2; x++) {
-      for (let y = leavesStart; y <= leavesStart + 2; y++) {
-        for (let z = startZ - 2; z <= startZ + 2; z++) {
+    const leavesEnd = startY + trunkHeight + 1; // 1 block above trunk top
+    
+    for (let y = leavesStart; y <= leavesEnd; y++) {
+      const dy = y - (startY + trunkHeight - 1); // Distance from top of trunk
+      let radius = 2;
+      if (dy === 2) radius = 1; // Top tip
+      else if (dy === -1) radius = 2; // Bottomest layer
+
+      for (let x = startX - radius; x <= startX + radius; x++) {
+        for (let z = startZ - radius; z <= startZ + radius; z++) {
+          // Corner rounding
+          const dx = x - startX;
+          const dz = z - startZ;
+          if (Math.abs(dx) === radius && Math.abs(dz) === radius) {
+             // Skip corners randomly to make it less square
+             if (Math.random() < 0.4) continue;
+          }
+
           if (
             x >= 0 && x < this.chunkSize &&
             y >= 0 && y < this.chunkSize &&
@@ -415,6 +446,9 @@ export class World {
     // 2. Generate Trees (Second Pass)
     for (let x = 0; x < this.chunkSize; x++) {
       for (let z = 0; z < this.chunkSize; z++) {
+         // Boundary check to prevent cut trees
+         if (x < 2 || x >= this.chunkSize - 2 || z < 2 || z >= this.chunkSize - 2) continue;
+
          // Find surface height
          let height = -1;
          for (let y = this.chunkSize - 1; y >= 0; y--) {
@@ -514,11 +548,25 @@ export class World {
         normals.push(-1,0,0, -1,0,0, -1,0,0, -1,0,0);
       }
 
-      // UVs (Simple 0-1)
-      uvs.push(0,0, 1,0, 0,1, 1,1);
+      // UVs 
+      // Atlas: Left half (0-0.5) is Solid, Right half (0.5-1.0) is Transparent/Leaves
+      let u0 = 0;
+      let u1 = 0.5;
+      
+      if (type === BLOCK.LEAVES) {
+          u0 = 0.5;
+          u1 = 1.0;
+      }
+
+      uvs.push(u0,0, u1,0, u0,1, u1,1);
 
       // Colors (4 vertices per face)
       for(let i=0; i<4; i++) colors.push(r,g,b);
+    };
+
+    // Helper to check transparency
+    const isTransparent = (t: number) => {
+        return t === BLOCK.AIR || t === BLOCK.LEAVES;
     };
 
     // Iterate
@@ -531,30 +579,37 @@ export class World {
           if (type === BLOCK.AIR) continue;
 
           // Check neighbors
+          // We draw a face if the neighbor is transparent (Air or Leaves)
+          // Exception: If both are leaves, do we draw? 
+          // Yes, for high quality foliage we usually do.
+          // Or if neighbor is AIR.
+          
+          const checkNeighbor = (nx: number, ny: number, nz: number) => {
+             if (nx < 0 || nx >= this.chunkSize || 
+                 ny < 0 || ny >= this.chunkSize || 
+                 nz < 0 || nz >= this.chunkSize) {
+                 // Boundary of chunk.
+                 // Ideally we check global world block, but for now we assume boundary is transparent (or culled?)
+                 // If we assume transparent, we draw faces at chunk edges.
+                 // This is safer to avoid gaps.
+                 return true; 
+             }
+             const nType = data[this.getBlockIndex(nx, ny, nz)];
+             return isTransparent(nType);
+          };
+
           // Top
-          if (y === this.chunkSize - 1 || data[this.getBlockIndex(x, y+1, z)] === BLOCK.AIR) {
-            addFace(x, y, z, type, 'top');
-          }
+          if (checkNeighbor(x, y+1, z)) addFace(x, y, z, type, 'top');
           // Bottom
-          if (y === 0 || data[this.getBlockIndex(x, y-1, z)] === BLOCK.AIR) {
-            addFace(x, y, z, type, 'bottom');
-          }
+          if (checkNeighbor(x, y-1, z)) addFace(x, y, z, type, 'bottom');
           // Front (z+)
-          if (z === this.chunkSize - 1 || data[this.getBlockIndex(x, y, z+1)] === BLOCK.AIR) {
-            addFace(x, y, z, type, 'front');
-          }
+          if (checkNeighbor(x, y, z+1)) addFace(x, y, z, type, 'front');
           // Back (z-)
-          if (z === 0 || data[this.getBlockIndex(x, y, z-1)] === BLOCK.AIR) {
-            addFace(x, y, z, type, 'back');
-          }
+          if (checkNeighbor(x, y, z-1)) addFace(x, y, z, type, 'back');
           // Right (x+)
-          if (x === this.chunkSize - 1 || data[this.getBlockIndex(x+1, y, z)] === BLOCK.AIR) {
-            addFace(x, y, z, type, 'right');
-          }
+          if (checkNeighbor(x+1, y, z)) addFace(x, y, z, type, 'right');
           // Left (x-)
-          if (x === 0 || data[this.getBlockIndex(x-1, y, z)] === BLOCK.AIR) {
-            addFace(x, y, z, type, 'left');
-          }
+          if (checkNeighbor(x-1, y, z)) addFace(x, y, z, type, 'left');
         }
       }
     }
@@ -579,7 +634,9 @@ export class World {
     const material = new THREE.MeshStandardMaterial({ 
       map: this.noiseTexture,
       vertexColors: true,
-      roughness: 0.8
+      roughness: 0.8,
+      alphaTest: 0.5,
+      transparent: true // Allows partial transparency if we wanted, but alphaTest handles cutout
     });
 
     const mesh = new THREE.Mesh(geometry, material);
