@@ -71,6 +71,7 @@ export class Mob {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.y = yOffset;
       mesh.castShadow = true;
+      mesh.receiveShadow = true;
       return mesh;
     };
 

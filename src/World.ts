@@ -550,12 +550,14 @@ export class World {
 
       // UVs 
       // Atlas: Left half (0-0.5) is Solid, Right half (0.5-1.0) is Transparent/Leaves
-      let u0 = 0;
-      let u1 = 0.5;
+      // Inset to prevent bleeding
+      const uvInset = 0.001;
+      let u0 = 0 + uvInset;
+      let u1 = 0.5 - uvInset;
       
       if (type === BLOCK.LEAVES) {
-          u0 = 0.5;
-          u1 = 1.0;
+          u0 = 0.5 + uvInset;
+          u1 = 1.0 - uvInset;
       }
 
       uvs.push(u0,0, u1,0, u0,1, u1,1);
@@ -641,6 +643,8 @@ export class World {
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(startX, 0, startZ);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     
     return mesh;
   }

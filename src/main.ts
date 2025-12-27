@@ -26,16 +26,10 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// Lights
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-scene.add(ambientLight);
+import { Environment } from './Environment';
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-dirLight.position.set(20, 50, 20);
-dirLight.castShadow = true;
-dirLight.shadow.mapSize.width = 2048;
-dirLight.shadow.mapSize.height = 2048;
-scene.add(dirLight);
+// Lights - Handled by Environment
+const environment = new Environment(scene);
 
 // Controls
 const controls = new PointerLockControls(camera, document.body);
@@ -699,6 +693,8 @@ function animate() {
   
   const time = performance.now();
   const delta = (time - prevTime) / 1000;
+
+  environment.update(delta, controls.object.position);
   
   // Update Entities & Pickup
   for (let i = entities.length - 1; i >= 0; i--) {
