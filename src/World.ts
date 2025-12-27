@@ -26,12 +26,13 @@ export class World {
   private chunks: Map<string, Chunk> = new Map();
   
   // Data Store
-  public chunksData: Map<string, Uint8Array> = new Map();
+  private chunksData: Map<string, Uint8Array> = new Map();
   private dirtyChunks: Set<string> = new Set();
   private knownChunkKeys: Set<string> = new Set(); // Keys that exist in DB
   private loadingChunks: Set<string> = new Set(); // Keys currently being fetched from DB
 
-  private noise2D = createNoise2D();
+  private seed: number;
+  private noise2D: (x: number, y: number) => number;
   public noiseTexture: THREE.DataTexture;
 
   // Terrain Settings
@@ -41,7 +42,21 @@ export class World {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    this.seed = Math.floor(Math.random() * 2147483647);
+    this.noise2D = this.createNoiseGenerator();
     this.noiseTexture = this.createNoiseTexture();
+  }
+
+  private createNoiseGenerator() {
+      // Mulberry32 PRNG
+      let a = this.seed;
+      const random = () => {
+          let t = a += 0x6D2B79F5;
+          t = Math.imul(t ^ t >>> 15, t | 1);
+          t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+          return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+      return createNoise2D(random);
   }
 
   // --- Persistence Methods ---
@@ -55,6 +70,14 @@ export class World {
     // Load all chunk keys so we know what to fetch vs generate
     const keys = await worldDB.keys('chunks');
     keys.forEach(k => this.knownChunkKeys.add(k as string));
+
+    if (meta && meta.seed !== undefined) {
+        this.seed = meta.seed;
+        console.log(`Loaded seed: ${this.seed}`);
+        this.noise2D = this.createNoiseGenerator();
+    } else {
+        console.log(`No seed found, using current: ${this.seed}`);
+    }
 
     console.log(`Loaded world index. ${this.knownChunkKeys.size} chunks in DB.`);
 
@@ -70,7 +93,8 @@ export class World {
     // Save Meta
     await worldDB.set('player', {
         position: { x: playerData.position.x, y: playerData.position.y, z: playerData.position.z },
-        inventory: playerData.inventory
+        inventory: playerData.inventory,
+        seed: this.seed
     }, 'meta');
 
     // Save Dirty Chunks
@@ -86,6 +110,31 @@ export class World {
     await Promise.all(promises);
     this.dirtyChunks.clear();
     console.log('World saved.');
+  }
+
+  public async deleteWorld() {
+    console.log('Deleting world...');
+    await worldDB.init();
+    await worldDB.clear();
+    
+    this.chunksData.clear();
+    this.dirtyChunks.clear();
+    this.knownChunkKeys.clear();
+    this.loadingChunks.clear();
+    
+    // Remove all meshes
+    for (const [key, chunk] of this.chunks) {
+        this.scene.remove(chunk.mesh);
+        chunk.mesh.geometry.dispose();
+        (chunk.mesh.material as THREE.Material).dispose();
+    }
+    this.chunks.clear();
+    
+    // Reset seed
+    this.seed = Math.floor(Math.random() * 2147483647);
+    this.noise2D = this.createNoiseGenerator();
+
+    console.log('World deleted.');
   }
 
   private checkMemory(playerPos: THREE.Vector3) {

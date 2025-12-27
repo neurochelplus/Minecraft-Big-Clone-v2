@@ -32,26 +32,38 @@
       <div id="hotbar"></div>
     </div>
     <div id="damage-overlay"></div>
-    <div id="blocker">
+    
+    <!-- Main Menu -->
+    <div id="main-menu">
+      <h1>Minecraft Clone</h1>
+      <button id="btn-new-game" class="minecraft-btn">New Game</button>
+      <button id="btn-continue" class="minecraft-btn">Continue</button>
+    </div>
+
+    <!-- Pause Menu -->
+    <div id="pause-menu" style="display: none;">
+      <h2>Game Paused</h2>
+      <button id="btn-resume" class="minecraft-btn">Resume</button>
+      <button id="btn-exit" class="minecraft-btn">Save & Quit</button>
+    </div>
+
+    <div id="blocker" style="display: none;">
       <div id="instructions">
-        <p style="font-size:36px">Click to Play</p>
+        <p style="font-size:36px">Click to Return</p>
         <p>Move: W, A, S, D</p>
         <p>Jump: SPACE</p>
         <p>Look: Mouse</p>
         <p>Interact: Left/Right Click</p>
         <p>Hotbar: 1-9 or Scroll</p>
         <p>Inventory: E</p>
+        <p>Pause: ESC</p>
       </div>
     </div>
     <div id="app"></div>
     
     <!-- Mobile UI -->
     <div id="mobile-ui">
-      <div id="fs-prompt">
-        <h1>Minecraft Clone</h1>
-        <p>Tap to Start</p>
-        <button id="btn-start-mobile">PLAY FULLSCREEN</button>
-      </div>
+      <!-- Removed fs-prompt and btn-start-mobile -->
       
       <div id="joystick-zone">
         <div id="joystick-base">
@@ -66,6 +78,7 @@
       </div>
       
       <div class="mob-btn" id="btn-inv">INV</div>
+      <div class="mob-btn" id="btn-menu">MENU</div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

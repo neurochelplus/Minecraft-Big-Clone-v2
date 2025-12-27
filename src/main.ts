@@ -20,8 +20,6 @@ camera.rotation.order = 'YXZ';
 camera.position.set(8, 20, 20);
 camera.lookAt(8, 8, 8);
 
-let isMobileGameStarted = false;
-
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -42,25 +40,14 @@ scene.add(dirLight);
 // Controls
 const controls = new PointerLockControls(camera, document.body);
 
-const blocker = document.getElementById('blocker')!;
-const instructions = document.getElementById('instructions')!;
-
-instructions.addEventListener('click', () => {
-  if (!isInventoryOpen && !isMobile) {
-    controls.lock();
-  }
-});
-
 controls.addEventListener('lock', () => {
-  instructions.style.display = 'none';
-  blocker.style.display = 'none';
   if (isInventoryOpen) toggleInventory(); // Close inventory if locking (e.g. clicking back in)
 });
 
 controls.addEventListener('unlock', () => {
-  if (!isInventoryOpen) {
-    blocker.style.display = 'flex';
-    instructions.style.display = 'block';
+  // If we unlocked and we are not in inventory or already paused (via menu), then auto-pause
+  if (!isInventoryOpen && !isPaused && isGameStarted) {
+    showPauseMenu();
   }
 });
 
@@ -104,7 +91,11 @@ const onKeyDown = (event: KeyboardEvent) => {
       }
       break;
     case 'KeyE':
-      toggleInventory();
+      if (!isPaused) toggleInventory();
+      break;
+    case 'Escape':
+      if (isInventoryOpen) toggleInventory();
+      else togglePauseMenu();
       break;
   }
 };
@@ -635,6 +626,7 @@ function performInteract() {
 }
 
 document.addEventListener('mousedown', (event) => {
+  if (isPaused || !isGameStarted) return;
   if (!controls.isLocked && !isMobile) return;
   if (isInventoryOpen) return;
   
@@ -698,6 +690,11 @@ let prevTime = performance.now();
 function animate() {
   requestAnimationFrame(animate);
 
+  if (isPaused) {
+      renderer.render(scene, camera);
+      return;
+  }
+
   world.update(controls.object.position);
   
   const time = performance.now();
@@ -749,7 +746,7 @@ function animate() {
   mobManager.update(delta, controls.object.position, takeDamage);
 
   // Cursor Update
-  if (controls.isLocked || isMobileGameStarted) {
+  if (!isPaused && isGameStarted) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     const intersects = raycaster.intersectObjects(scene.children);
     const hit = intersects.find(i => i.object !== cursorMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
@@ -767,13 +764,14 @@ function animate() {
     }
   }
   
-  if (controls.isLocked || isMobileGameStarted) {
+  if (!isPaused && isGameStarted) {
     // Safety: Don't apply physics if the current chunk isn't loaded yet
     // This prevents falling through the world upon load/teleport
     if (!world.isChunkLoaded(controls.object.position.x, controls.object.position.z)) {
          // Still update entities/mobs even if player is frozen, but skip player physics
          // Actually, if we return here, we skip player movement code below.
          // We rely on the global world.update() at start of animate() to keep loading chunks.
+        prevTime = time;
         return; 
     }
 
@@ -1219,25 +1217,13 @@ if (isMobile) {
 
 
 
-  // Fullscreen Prompt
+  // Mobile Menu Button
 
-  const btnStart = document.getElementById('btn-start-mobile')!;
+  document.getElementById('btn-menu')!.addEventListener('touchstart', (e) => {
 
-  const fsPrompt = document.getElementById('fs-prompt')!;
+      e.preventDefault();
 
-  
-
-  btnStart.addEventListener('touchstart', () => {
-
-    isMobileGameStarted = true;
-
-    document.documentElement.requestFullscreen().catch(err => {
-
-        console.log("Fullscreen denied", err);
-
-    });
-
-    fsPrompt.style.display = 'none';
+      togglePauseMenu();
 
   });
 
@@ -1245,35 +1231,143 @@ if (isMobile) {
 
 
 
-async function initGame() {
-    console.log("Initializing game...");
+// --- Game State & Menus ---
+let isPaused = true;
+let isGameStarted = false;
+
+const mainMenu = document.getElementById('main-menu')!;
+const pauseMenu = document.getElementById('pause-menu')!;
+const btnNewGame = document.getElementById('btn-new-game')!;
+const btnContinue = document.getElementById('btn-continue')!;
+const btnResume = document.getElementById('btn-resume')!;
+const btnExit = document.getElementById('btn-exit')!;
+
+function showMainMenu() {
+    isPaused = true;
+    isGameStarted = false;
+    mainMenu.style.display = 'flex';
+    pauseMenu.style.display = 'none';
+    inventoryMenu.style.display = 'none';
+    document.getElementById('ui-container')!.style.display = 'none';
+    if (isMobile) document.getElementById('mobile-ui')!.style.display = 'none';
+    
+    controls.unlock();
+}
+
+function showPauseMenu() {
+    isPaused = true;
+    pauseMenu.style.display = 'flex';
+    controls.unlock();
+}
+
+function hidePauseMenu() {
+    isPaused = false;
+    pauseMenu.style.display = 'none';
+    if (!isMobile) controls.lock();
+    prevTime = performance.now();
+}
+
+function togglePauseMenu() {
+    if (!isGameStarted) return;
+    
+    if (isPaused) {
+        hidePauseMenu();
+    } else {
+        showPauseMenu();
+    }
+}
+
+async function startGame(loadSave: boolean) {
+    if (!isMobile) {
+        // Must lock immediately on user gesture
+        controls.lock();
+    }
+    
+    // Show Loading
+    btnNewGame.innerText = "Loading...";
+    btnContinue.innerText = "Loading...";
+    
+    console.log("Starting game...", loadSave ? "(Loading)" : "(New Game)");
+    
     try {
-        const data = await world.loadWorld();
-        if (data.playerPosition) {
-            controls.object.position.copy(data.playerPosition);
-            velocity.set(0, 0, 0); 
-        }
-        if (data.inventory) {
+        if (!loadSave) {
+            await world.deleteWorld();
+            // Reset player state
+            playerHP = 20;
+            updateHealthUI();
+            controls.object.position.set(8, 20, 20);
+            velocity.set(0, 0, 0);
+            // Clear inventory
             for(let i=0; i<36; i++) {
-                if (data.inventory[i]) {
-                    inventorySlots[i] = data.inventory[i];
-                }
+                inventorySlots[i] = { id: 0, count: 0 };
             }
             refreshInventoryUI();
+        } else {
+            const data = await world.loadWorld();
+            if (data.playerPosition) {
+                controls.object.position.copy(data.playerPosition);
+                velocity.set(0, 0, 0); 
+            }
+            if (data.inventory) {
+                for(let i=0; i<36; i++) {
+                    if (data.inventory[i]) {
+                        inventorySlots[i] = data.inventory[i];
+                    }
+                }
+                refreshInventoryUI();
+            }
         }
-    } catch (e) {
-        console.error("Failed to load world:", e);
-    }
 
-    // Auto-save loop
-    setInterval(() => {
+        isGameStarted = true;
+        isPaused = false;
+        prevTime = performance.now();
+        mainMenu.style.display = 'none';
+        pauseMenu.style.display = 'none';
+        document.getElementById('ui-container')!.style.display = 'flex';
+        if (isMobile) {
+            document.getElementById('mobile-ui')!.style.display = 'block';
+            document.documentElement.requestFullscreen().catch(() => {});
+        }
+        
+    } catch (e) {
+        console.error("Failed to start game:", e);
+        alert("Error starting game: " + e);
+        // Unlock if failed so user can see alert/menu
+        if (!isMobile) controls.unlock();
+    } finally {
+        btnNewGame.innerText = "New Game";
+        btnContinue.innerText = "Continue";
+    }
+}
+
+// Menu Listeners
+btnNewGame.addEventListener('click', () => startGame(false));
+btnContinue.addEventListener('click', () => startGame(true));
+btnResume.addEventListener('click', () => hidePauseMenu());
+
+btnExit.addEventListener('click', async () => {
+    // Save
+    await world.saveWorld({
+        position: controls.object.position,
+        inventory: inventorySlots
+    });
+    
+    // Return to main menu
+    showMainMenu();
+});
+
+// Auto-save loop
+setInterval(() => {
+    if (isGameStarted && !isPaused) {
         world.saveWorld({
             position: controls.object.position,
             inventory: inventorySlots
         });
-    }, 30000);
+    }
+}, 30000);
 
-    animate();
-}
+// Start Animation Loop immediately, but it will respect isPaused
+animate();
 
-initGame();
+// Initial State
+showMainMenu();

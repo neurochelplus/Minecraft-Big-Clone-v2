@@ -10,7 +10,7 @@ export class DB {
 
   async init(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, 1);
+      const request = indexedDB.open(this.dbName, 2);
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
@@ -76,6 +76,19 @@ export class DB {
           request.onerror = () => reject(request.error);
           request.onsuccess = () => resolve(request.result);
       });
+  }
+
+  async clear(): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (!this.db) return reject('DB not initialized');
+        const transaction = this.db.transaction([this.storeName, 'meta'], 'readwrite');
+        
+        transaction.onerror = () => reject(transaction.error);
+        transaction.oncomplete = () => resolve();
+
+        transaction.objectStore(this.storeName).clear();
+        transaction.objectStore('meta').clear();
+    });
   }
 }
 
