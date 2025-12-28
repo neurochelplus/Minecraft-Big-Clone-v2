@@ -5,6 +5,7 @@ import { World } from './World';
 export class Zombie extends Mob {
   protected readonly walkSpeed: number = 1.75; 
   private lastAttackTime = 0;
+  private targetShelter: THREE.Vector3 | null = null;
   
   // Body Parts
   private head: THREE.Mesh;
@@ -82,7 +83,7 @@ export class Zombie extends Mob {
     const time = performance.now() / 1000;
     
     // --- Burning Logic ---
-    if (isDay && !this.isOnFire && !this.isDead) {
+    if (isDay && !this.isDead) {
         // Check if under cover
         const x = Math.floor(this.mesh.position.x);
         const z = Math.floor(this.mesh.position.z);
@@ -97,11 +98,8 @@ export class Zombie extends Mob {
             }
         }
         
-        if (!covered) {
-            this.setFire(true);
-        }
-    } else if (!isDay && this.isOnFire) {
-        // Extinguish at night
+        this.setFire(!covered);
+    } else {
         this.setFire(false);
     }
 
@@ -136,7 +134,42 @@ export class Zombie extends Mob {
 
     const dist = this.mesh.position.distanceTo(playerPos);
 
-    if (this.state !== MobState.CHASE && dist < 15) {
+    // --- Shelter Logic ---
+    // If burning, day, far from player, and not already seeking or chasing close
+    if (isDay && this.isOnFire && dist > 12 && this.state !== MobState.SEEK_SHELTER && this.state !== MobState.ATTACK) {
+        const shelter = this.findNearbyShelter();
+        if (shelter) {
+            this.state = MobState.SEEK_SHELTER;
+            this.targetShelter = shelter;
+        }
+    }
+
+    // Stop seeking if night or player is close
+    if (this.state === MobState.SEEK_SHELTER) {
+        if (!isDay || dist < 10) {
+            this.state = MobState.IDLE;
+            this.targetShelter = null;
+        }
+    }
+
+    // State Handling
+    if (this.state === MobState.SEEK_SHELTER && this.targetShelter) {
+        // Move to shelter
+        const dx = this.targetShelter.x - this.mesh.position.x;
+        const dz = this.targetShelter.z - this.mesh.position.z;
+        const dToShelter = Math.sqrt(dx*dx + dz*dz);
+        
+        if (dToShelter > 0.5) {
+            const angle = Math.atan2(dx, dz);
+            this.mesh.rotation.y = angle;
+            this.velocity.x = Math.sin(angle) * this.walkSpeed;
+            this.velocity.z = Math.cos(angle) * this.walkSpeed;
+        } else {
+            // Reached shelter
+            this.velocity.x = 0;
+            this.velocity.z = 0;
+        }
+    } else if (this.state !== MobState.CHASE && dist < 15) {
       this.state = MobState.CHASE;
     } else if (this.state === MobState.CHASE && dist > 20) {
       this.state = MobState.IDLE;
@@ -171,18 +204,58 @@ export class Zombie extends Mob {
             this.state = MobState.ATTACK;
             if (onAttack) onAttack(2);
             
-            // Attack Punch Animation
-            // We can just tween rotation or set a flag
-            // Simple immediate visual feedback:
             this.leftArmGroup.rotation.x -= 0.6;
             this.rightArmGroup.rotation.x -= 0.6;
             
             this.lastAttackTime = now;
         }
       }
-    } else {
+    } else if (this.state !== MobState.SEEK_SHELTER) {
       super.updateAI(delta, playerPos, onAttack, isDay);
     }
+  }
+
+  private findNearbyShelter(): THREE.Vector3 | null {
+      const range = 10;
+      const startX = Math.floor(this.mesh.position.x);
+      const startY = Math.floor(this.mesh.position.y);
+      const startZ = Math.floor(this.mesh.position.z);
+      
+      let bestSpot: THREE.Vector3 | null = null;
+      let minDist = Infinity;
+
+      for (let x = -range; x <= range; x++) {
+          for (let z = -range; z <= range; z++) {
+              const cx = startX + x;
+              const cz = startZ + z;
+              
+              // 1. Must be walkable (ground at y or y-1)
+              // We assume flat-ish terrain for simplicity or check current Y level
+              // Check if ground exists at Y-1
+              if (!this.world.hasBlock(cx, startY - 1, cz)) continue;
+              
+              // 2. Must be empty space for body (Y and Y+1)
+              if (this.world.hasBlock(cx, startY, cz) || this.world.hasBlock(cx, startY + 1, cz)) continue;
+              
+              // 3. Must have roof within reasonable height (Y+2 to Y+10)
+              let hasRoof = false;
+              for(let k=2; k<=10; k++) {
+                  if (this.world.hasBlock(cx, startY + k, cz)) {
+                      hasRoof = true;
+                      break;
+                  }
+              }
+              
+              if (hasRoof) {
+                  const dist = (x*x + z*z);
+                  if (dist < minDist) {
+                      minDist = dist;
+                      bestSpot = new THREE.Vector3(cx + 0.5, startY, cz + 0.5);
+                  }
+              }
+          }
+      }
+      return bestSpot;
   }
 
   protected onHorizontalCollision() {

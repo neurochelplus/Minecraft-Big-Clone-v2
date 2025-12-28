@@ -5,7 +5,8 @@ export const MobState = {
   IDLE: 0,
   WANDER: 1,
   CHASE: 2,
-  ATTACK: 3
+  ATTACK: 3,
+  SEEK_SHELTER: 4
 } as const;
 
 export type MobState = typeof MobState[keyof typeof MobState];
