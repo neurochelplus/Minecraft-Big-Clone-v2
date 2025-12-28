@@ -38,13 +38,29 @@
       <h1>Minecraft Clone</h1>
       <button id="btn-new-game" class="minecraft-btn">New Game</button>
       <button id="btn-continue" class="minecraft-btn">Continue</button>
+      <button id="btn-settings-main" class="minecraft-btn">Settings</button>
     </div>
 
     <!-- Pause Menu -->
     <div id="pause-menu" style="display: none;">
       <h2>Game Paused</h2>
       <button id="btn-resume" class="minecraft-btn">Resume</button>
+      <button id="btn-settings-pause" class="minecraft-btn">Settings</button>
       <button id="btn-exit" class="minecraft-btn">Save & Quit</button>
+    </div>
+
+    <!-- Settings Menu -->
+    <div id="settings-menu" style="display: none;">
+      <h2>Settings</h2>
+      <div class="setting-item">
+        <label for="cb-shadows">Enable Shadows</label>
+        <input type="checkbox" id="cb-shadows" checked>
+      </div>
+      <div class="setting-item">
+        <label for="cb-clouds">Enable Clouds</label>
+        <input type="checkbox" id="cb-clouds" checked>
+      </div>
+      <button id="btn-back-settings" class="minecraft-btn">Back</button>
     </div>
 
     <div id="blocker" style="display: none;">

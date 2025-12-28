@@ -182,7 +182,7 @@ canvas {
   }
   
   /* Minecraft Menus */
-  #main-menu, #pause-menu {
+  #main-menu, #pause-menu, #settings-menu {
     position: absolute;
     top: 0;
     left: 0;
@@ -200,10 +200,25 @@ canvas {
     text-align: center;
   }
   
-  #main-menu h1, #pause-menu h2 {
+  #main-menu h1, #pause-menu h2, #settings-menu h2 {
     font-size: 48px;
     margin-bottom: 40px;
     text-shadow: 4px 4px 0px #3f3f3f;
+  }
+  
+  .setting-item {
+      margin: 20px;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-shadow: 2px 2px 0px #3f3f3f;
+  }
+  
+  .setting-item input[type="checkbox"] {
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
   }
 
   .minecraft-btn {

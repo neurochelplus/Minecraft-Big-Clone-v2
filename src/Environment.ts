@@ -25,6 +25,12 @@ export class Environment {
   private readonly lightColorSunset = new THREE.Color(0xffaa00);
   private readonly lightColorNight = new THREE.Color(0x1a1a3a); // Moon light (bluish)
 
+  public get isDay(): boolean {
+      const progress = this.time / this.totalCycleDuration;
+      const angle = (progress * Math.PI * 2) - (Math.PI / 2);
+      return Math.sin(angle) > 0;
+  }
+
   constructor(scene: THREE.Scene) {
     this.scene = scene;
 
@@ -95,6 +101,22 @@ export class Environment {
     instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     instancedMesh.frustumCulled = false; 
     return instancedMesh;
+  }
+
+  public setTimeToDay() {
+    this.time = this.totalCycleDuration * 0.5; // Noon
+  }
+
+  public setTimeToNight() {
+    this.time = 0; // Midnight
+  }
+
+  public setShadowsEnabled(enabled: boolean) {
+    this.dirLight.castShadow = enabled;
+  }
+
+  public setCloudsEnabled(enabled: boolean) {
+    this.clouds.visible = enabled;
   }
 
   public update(delta: number, playerPos: THREE.Vector3) {

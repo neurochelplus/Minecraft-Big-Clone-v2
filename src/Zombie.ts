@@ -1,150 +1,201 @@
 import * as THREE from 'three';
 import { Mob, MobState } from './Mob';
+import { World } from './World';
 
 export class Zombie extends Mob {
-  
-  // Slower than player (Player is usually faster, let's say Zombie is 3.5, Player ~5-6)
   protected readonly walkSpeed: number = 1.75; 
   private lastAttackTime = 0;
   
-  // Arms
+  // Body Parts
+  private head: THREE.Mesh;
+  private body: THREE.Mesh;
+  
+  // Pivots for animation
+  private leftArmGroup: THREE.Group;
+  private rightArmGroup: THREE.Group;
+  private leftLegGroup: THREE.Group;
+  private rightLegGroup: THREE.Group;
+  
   private leftArm: THREE.Mesh;
   private rightArm: THREE.Mesh;
+  private leftLeg: THREE.Mesh;
+  private rightLeg: THREE.Mesh;
 
-  constructor(world: any, scene: THREE.Scene, x: number, y: number, z: number) {
+  constructor(world: World, scene: THREE.Scene, x: number, y: number, z: number) {
       super(world, scene, x, y, z);
       
       const texture = world.noiseTexture;
       const skinColor = [0.2, 0.6, 0.2]; // Green
-      
-      const createArm = (xOffset: number) => {
-          const geo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
-          const count = geo.attributes.position.count;
-          const colors: number[] = [];
-          for(let i=0; i<count; i++) colors.push(...skinColor);
-          geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-          
-          const mat = new THREE.MeshStandardMaterial({
-            map: texture,
-            vertexColors: true,
-            roughness: 0.8
-          });
-          
-          const mesh = new THREE.Mesh(geo, mat);
-          // Pivot at shoulder (approx 1.15 height)
-          mesh.position.set(xOffset, 1.15, 0.4); 
-          // Default pose: arms forward ("Zombie pose")
-          mesh.rotation.x = -Math.PI / 2; 
-          return mesh;
-      };
+      const shirtColor = [0.2, 0.2, 0.8]; // Blue
+      const pantsColor = [0.2, 0.2, 0.6]; // Dark Blue
 
-      this.leftArm = createArm(-0.35);
-      this.rightArm = createArm(0.35);
+      // 1. Legs (Height 0.7)
+      // Pivot at y=0.7 (Hip)
+      this.leftLegGroup = new THREE.Group();
+      this.leftLegGroup.position.set(-0.1, 0.7, 0);
+      this.mesh.add(this.leftLegGroup);
       
-      this.mesh.add(this.leftArm);
-      this.mesh.add(this.rightArm);
+      // Mesh centered at -0.35 relative to pivot
+      this.leftLeg = this.createBox(0.2, 0.7, 0.2, pantsColor, -0.35, texture);
+      this.leftLegGroup.add(this.leftLeg);
+
+      this.rightLegGroup = new THREE.Group();
+      this.rightLegGroup.position.set(0.1, 0.7, 0);
+      this.mesh.add(this.rightLegGroup);
+      
+      this.rightLeg = this.createBox(0.2, 0.7, 0.2, pantsColor, -0.35, texture);
+      this.rightLegGroup.add(this.rightLeg);
+
+      // 2. Body (Height 0.6, Base 0.7)
+      // Body center is at 0.7 + 0.3 = 1.0
+      this.body = this.createBox(0.5, 0.6, 0.25, shirtColor, 1.0, texture);
+      this.mesh.add(this.body);
+
+      // 3. Head (Height 0.5, Base 1.3)
+      // Center at 1.3 + 0.25 = 1.55
+      this.head = this.createBox(0.4, 0.5, 0.4, skinColor, 1.55, texture);
+      this.mesh.add(this.head);
+
+      // 4. Arms (Height 0.7)
+      // Pivot at Shoulder (y=1.3, x=±0.35)
+      this.leftArmGroup = new THREE.Group();
+      this.leftArmGroup.position.set(-0.35, 1.3, 0);
+      this.mesh.add(this.leftArmGroup);
+
+      // Mesh centered at -0.35 relative to pivot
+      this.leftArm = this.createBox(0.2, 0.7, 0.2, skinColor, -0.35, texture);
+      this.leftArmGroup.add(this.leftArm);
+
+      this.rightArmGroup = new THREE.Group();
+      this.rightArmGroup.position.set(0.35, 1.3, 0);
+      this.mesh.add(this.rightArmGroup);
+
+      this.rightArm = this.createBox(0.2, 0.7, 0.2, skinColor, -0.35, texture);
+      this.rightArmGroup.add(this.rightArm);
+
+      // Initial Pose
+      this.leftArmGroup.rotation.x = -Math.PI / 2;
+      this.rightArmGroup.rotation.x = -Math.PI / 2;
   }
 
-  protected updateAI(delta: number, playerPos?: THREE.Vector3, onAttack?: (damage: number) => void) {
-    // Animation: bob arms
+  protected updateAI(delta: number, playerPos?: THREE.Vector3, onAttack?: (damage: number) => void, isDay?: boolean) {
     const time = performance.now() / 1000;
+    
+    // --- Burning Logic ---
+    if (isDay && !this.isOnFire && !this.isDead) {
+        // Check if under cover
+        const x = Math.floor(this.mesh.position.x);
+        const z = Math.floor(this.mesh.position.z);
+        const y = Math.floor(this.mesh.position.y + 1.8); // Check from head up
+        
+        let covered = false;
+        // Check 10 blocks up
+        for(let i=0; i<10; i++) {
+            if (this.world.hasBlock(x, y+i, z)) {
+                covered = true;
+                break;
+            }
+        }
+        
+        if (!covered) {
+            this.setFire(true);
+        }
+    } else if (!isDay && this.isOnFire) {
+        // Extinguish at night
+        this.setFire(false);
+    }
+
+    // --- Animation ---
     const isMoving = this.velocity.lengthSq() > 0.1;
     
     if (isMoving) {
-        // Simple bobbing when moving
-        this.leftArm.rotation.x = -Math.PI / 2 + Math.sin(time * 10) * 0.1;
-        this.rightArm.rotation.x = -Math.PI / 2 - Math.sin(time * 10) * 0.1;
+        const speed = 10;
+        const angle = time * speed;
+        
+        this.leftLegGroup.rotation.x = Math.sin(angle) * 0.5;
+        this.rightLegGroup.rotation.x = -Math.sin(angle) * 0.5;
+        
+        // Arms (Zombie pose + swing)
+        // Swing opposite to legs
+        this.leftArmGroup.rotation.x = -Math.PI / 2 + Math.sin(angle + Math.PI) * 0.2;
+        this.rightArmGroup.rotation.x = -Math.PI / 2 + Math.sin(angle) * 0.2;
     } else {
-        // Idle breathing
-        this.leftArm.rotation.x = -Math.PI / 2 + Math.sin(time * 2) * 0.05;
-        this.rightArm.rotation.x = -Math.PI / 2 + Math.sin(time * 2 + 1) * 0.05;
+        // Idle
+        this.leftLegGroup.rotation.x = 0;
+        this.rightLegGroup.rotation.x = 0;
+        
+        // Breathing
+        this.leftArmGroup.rotation.x = -Math.PI / 2 + Math.sin(time * 2) * 0.05;
+        this.rightArmGroup.rotation.x = -Math.PI / 2 + Math.sin(time * 2 + 1) * 0.05;
     }
 
     if (!playerPos) {
-      super.updateAI(delta);
+      super.updateAI(delta, playerPos, onAttack, isDay);
       return;
     }
 
     const dist = this.mesh.position.distanceTo(playerPos);
 
-    // AI State Logic with Hysteresis
     if (this.state !== MobState.CHASE && dist < 15) {
       this.state = MobState.CHASE;
     } else if (this.state === MobState.CHASE && dist > 20) {
       this.state = MobState.IDLE;
-      // Reset velocity when losing aggro
       this.velocity.x = 0;
       this.velocity.z = 0;
     }
 
     if (this.state === MobState.CHASE) {
-      // Look at player (only Y rotation)
       const dx = playerPos.x - this.mesh.position.x;
       const dz = playerPos.z - this.mesh.position.z;
       const angle = Math.atan2(dx, dz);
       this.mesh.rotation.y = angle;
 
-      // Base movement
-      // Stop at 2.0m (just inside attack range)
       if (dist > 2.0) {
           this.velocity.x = Math.sin(angle) * this.walkSpeed;
           this.velocity.z = Math.cos(angle) * this.walkSpeed;
       } else {
-          // Stop but keep looking
           this.velocity.x = 0;
           this.velocity.z = 0;
       }
 
-      // Separation (Push back if too close)
-      // Hard collision boundary at 1.5 units
       if (dist < 1.5) {
         const pushDir = this.mesh.position.clone().sub(playerPos).normalize();
-        const pushSpeed = 5.0; // Stronger push
+        const pushSpeed = 5.0;
         this.velocity.x += pushDir.x * pushSpeed;
         this.velocity.z += pushDir.z * pushSpeed;
       }
 
-      // Attack Logic
-      // Attack range (2.2) > Stopping distance (2.0)
       if (dist < 2.2) {
         const now = performance.now();
-        if (now - this.lastAttackTime > 1500) { // 1.5 second cooldown
+        if (now - this.lastAttackTime > 1500) {
             this.state = MobState.ATTACK;
-            // console.log('Зомби ударил игрока');
-            if (onAttack) onAttack(2); // Deal 2 damage
+            if (onAttack) onAttack(2);
             
-            // Attack animation punch
-            this.leftArm.rotation.x -= 0.5;
-            this.rightArm.rotation.x -= 0.5;
+            // Attack Punch Animation
+            // We can just tween rotation or set a flag
+            // Simple immediate visual feedback:
+            this.leftArmGroup.rotation.x -= 0.6;
+            this.rightArmGroup.rotation.x -= 0.6;
             
             this.lastAttackTime = now;
         }
       }
     } else {
-      // Default wander
-      super.updateAI(delta);
+      super.updateAI(delta, playerPos, onAttack, isDay);
     }
   }
 
   protected onHorizontalCollision() {
     if (this.isOnGround) {
-        // Simple auto-jump check:
-        // We hit a wall. Is the block ABOVE that wall empty?
-        
-        // Calculate point in front of zombie
         const direction = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.mesh.rotation.y);
-        const checkDist = 0.8; // Slightly ahead
+        const checkDist = 0.8;
         const checkPos = this.mesh.position.clone().add(direction.multiplyScalar(checkDist));
         
         const x = Math.floor(checkPos.x);
         const z = Math.floor(checkPos.z);
-        const y = Math.floor(this.mesh.position.y); // Current foot level
+        const y = Math.floor(this.mesh.position.y);
 
-        // Block at feet level is solid (we collided)
-        // Check block at head level (y+1)
         if (!this.world.hasBlock(x, y + 1, z) && !this.world.hasBlock(x, y + 2, z)) {
-            // Space to jump!
-            // Calculate jump impulse sqrt(2 * g * h) -> h=1.25 -> ~7
             this.velocity.y = Math.sqrt(2 * 20.0 * 1.25);
             this.isOnGround = false;
         }

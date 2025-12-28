@@ -27,9 +27,11 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
 import { Environment } from './Environment';
+import { initDebugControls } from './DebugUtils';
 
 // Lights - Handled by Environment
 const environment = new Environment(scene);
+initDebugControls(environment);
 
 // Controls
 const controls = new PointerLockControls(camera, document.body);
@@ -739,7 +741,7 @@ function animate() {
   }
 
   // Update Mob Manager
-  mobManager.update(delta, controls.object.position, takeDamage);
+  mobManager.update(delta, controls.object.position, environment, takeDamage);
 
   // Cursor Update
   if (!isPaused && isGameStarted) {
@@ -1230,19 +1232,29 @@ if (isMobile) {
 // --- Game State & Menus ---
 let isPaused = true;
 let isGameStarted = false;
+let previousMenu: HTMLElement | null = null; // To know where to go back to
 
 const mainMenu = document.getElementById('main-menu')!;
 const pauseMenu = document.getElementById('pause-menu')!;
+const settingsMenu = document.getElementById('settings-menu')!;
+
 const btnNewGame = document.getElementById('btn-new-game')!;
 const btnContinue = document.getElementById('btn-continue')!;
 const btnResume = document.getElementById('btn-resume')!;
 const btnExit = document.getElementById('btn-exit')!;
+
+const btnSettingsMain = document.getElementById('btn-settings-main')!;
+const btnSettingsPause = document.getElementById('btn-settings-pause')!;
+const btnBackSettings = document.getElementById('btn-back-settings')!;
+const cbShadows = document.getElementById('cb-shadows') as HTMLInputElement;
+const cbClouds = document.getElementById('cb-clouds') as HTMLInputElement;
 
 function showMainMenu() {
     isPaused = true;
     isGameStarted = false;
     mainMenu.style.display = 'flex';
     pauseMenu.style.display = 'none';
+    settingsMenu.style.display = 'none';
     inventoryMenu.style.display = 'none';
     document.getElementById('ui-container')!.style.display = 'none';
     if (isMobile) document.getElementById('mobile-ui')!.style.display = 'none';
@@ -1253,12 +1265,30 @@ function showMainMenu() {
 function showPauseMenu() {
     isPaused = true;
     pauseMenu.style.display = 'flex';
+    mainMenu.style.display = 'none';
+    settingsMenu.style.display = 'none';
     controls.unlock();
+}
+
+function showSettingsMenu(fromMenu: HTMLElement) {
+    previousMenu = fromMenu;
+    fromMenu.style.display = 'none';
+    settingsMenu.style.display = 'flex';
+}
+
+function hideSettingsMenu() {
+    settingsMenu.style.display = 'none';
+    if (previousMenu) {
+        previousMenu.style.display = 'flex';
+    } else {
+        showMainMenu(); // Fallback
+    }
 }
 
 function hidePauseMenu() {
     isPaused = false;
     pauseMenu.style.display = 'none';
+    settingsMenu.style.display = 'none';
     if (!isMobile) controls.lock();
     prevTime = performance.now();
 }
@@ -1266,6 +1296,13 @@ function hidePauseMenu() {
 function togglePauseMenu() {
     if (!isGameStarted) return;
     
+    // If we are in settings, Go back to pause menu first? 
+    // Or just close everything? Let's close everything or go to pause.
+    if (settingsMenu.style.display === 'flex') {
+        hideSettingsMenu();
+        return;
+    }
+
     if (isPaused) {
         hidePauseMenu();
     } else {
@@ -1319,6 +1356,7 @@ async function startGame(loadSave: boolean) {
         prevTime = performance.now();
         mainMenu.style.display = 'none';
         pauseMenu.style.display = 'none';
+        settingsMenu.style.display = 'none'; // Ensure settings are closed
         document.getElementById('ui-container')!.style.display = 'flex';
         if (isMobile) {
             document.getElementById('mobile-ui')!.style.display = 'block';
@@ -1336,10 +1374,23 @@ async function startGame(loadSave: boolean) {
     }
 }
 
+// Settings Logic
+cbShadows.addEventListener('change', () => {
+    environment.setShadowsEnabled(cbShadows.checked);
+});
+
+cbClouds.addEventListener('change', () => {
+    environment.setCloudsEnabled(cbClouds.checked);
+});
+
 // Menu Listeners
 btnNewGame.addEventListener('click', () => startGame(false));
 btnContinue.addEventListener('click', () => startGame(true));
 btnResume.addEventListener('click', () => hidePauseMenu());
+
+btnSettingsMain.addEventListener('click', () => showSettingsMenu(mainMenu));
+btnSettingsPause.addEventListener('click', () => showSettingsMenu(pauseMenu));
+btnBackSettings.addEventListener('click', () => hideSettingsMenu());
 
 btnExit.addEventListener('click', async () => {
     // Save

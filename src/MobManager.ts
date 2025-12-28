@@ -5,6 +5,8 @@ import { Mob } from './Mob';
 
 import { ItemEntity } from './ItemEntity';
 
+import { Environment } from './Environment';
+
 export class MobManager {
   public mobs: Mob[] = [];
   private world: World;
@@ -21,17 +23,16 @@ export class MobManager {
     this.entities = entities;
   }
 
-  public update(delta: number, playerPos: THREE.Vector3, onPlayerHit?: (damage: number) => void) {
+  public update(delta: number, playerPos: THREE.Vector3, environment: Environment, onPlayerHit?: (damage: number) => void) {
     const now = performance.now();
+    const isDay = environment.isDay;
 
     // 1. Update existing mobs & check despawn
     for (let i = this.mobs.length - 1; i >= 0; i--) {
       const mob = this.mobs[i];
       
       if (mob.isDead) {
-         // Drop Item (Rotten Flesh equivalent - using Red block for now or Green)
-         // Let's drop a "Leaves" block (ID 6) as fake loot for now, or ID 2 Dirt.
-         // Better: Let's assume ID 6 (Leaves) looks somewhat organic green.
+         // Drop Item
          this.entities.push(new ItemEntity(
              this.world, 
              this.scene, 
@@ -46,7 +47,7 @@ export class MobManager {
          continue;
       }
 
-      mob.update(delta, playerPos, onPlayerHit);
+      mob.update(delta, playerPos, onPlayerHit, isDay);
 
       // Despawn if too far (> 80 blocks)
       const dist = mob.mesh.position.distanceTo(playerPos);
@@ -55,10 +56,10 @@ export class MobManager {
       }
     }
 
-    // 2. Spawn logic
-    if (this.mobs.length < this.MAX_MOBS && now - this.lastSpawnTime > this.spawnInterval) {
+    // 2. Spawn logic (Only at Night)
+    if (!isDay && this.mobs.length < this.MAX_MOBS && now - this.lastSpawnTime > this.spawnInterval) {
       this.attemptSpawn(playerPos);
-      this.lastSpawnTime = now + Math.random() * 5000; // Randomize next interval (10-15s total)
+      this.lastSpawnTime = now + Math.random() * 5000; 
     }
   }
 

@@ -32,16 +32,16 @@ export class Mob {
   protected world: World;
   protected scene: THREE.Scene;
 
-  // Visuals
-  protected head: THREE.Mesh;
-  protected body: THREE.Mesh;
-  protected legs: THREE.Mesh;
-
   // Stats
   public hp = 20;
   public maxHp = 20;
   public isDead = false;
   public isHurt = false;
+  
+  // Fire
+  public isOnFire = false;
+  private fireTimer = 0;
+  private fireMesh: THREE.Mesh | null = null;
 
   constructor(world: World, scene: THREE.Scene, x: number, y: number, z: number) {
     this.world = world;
@@ -52,10 +52,10 @@ export class Mob {
     this.mesh.userData.mob = this;
     this.mesh.position.set(x, y, z);
     
-    // Create Parts
-    const texture = world.noiseTexture;
-    
-    const createBox = (w: number, h: number, d: number, colorRGB: number[], yOffset: number) => {
+    this.scene.add(this.mesh);
+  }
+  
+  protected createBox(w: number, h: number, d: number, colorRGB: number[], yOffset: number, texture: THREE.Texture): THREE.Mesh {
       const geo = new THREE.BoxGeometry(w, h, d);
       const count = geo.attributes.position.count;
       const colors: number[] = [];
@@ -73,30 +73,31 @@ export class Mob {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       return mesh;
-    };
-
-    // Zombie-like colors
-    const skinColor = [0.2, 0.6, 0.2]; // Green
-    const shirtColor = [0.2, 0.2, 0.8]; // Blue
-    const pantsColor = [0.2, 0.2, 0.6]; // Dark Blue
-
-    // Legs (0 to 0.7) - Center Y relative to group origin (feet)
-    // BoxGeometry is centered at 0,0,0. So we move it up by height/2 + offset
-    this.legs = createBox(0.4, 0.7, 0.2, pantsColor, 0.35);
-    this.mesh.add(this.legs);
-    
-    // Body (0.7 to 1.3)
-    this.body = createBox(0.5, 0.6, 0.25, shirtColor, 0.7 + 0.3);
-    this.mesh.add(this.body);
-    
-    // Head (1.3 to 1.7)
-    this.head = createBox(0.4, 0.4, 0.4, skinColor, 1.3 + 0.2);
-    this.mesh.add(this.head);
-
-    this.scene.add(this.mesh);
   }
 
-  public takeDamage(amount: number, attackerPos: THREE.Vector3) {
+  public setFire(active: boolean) {
+      if (this.isOnFire === active) return;
+      this.isOnFire = active;
+      
+      if (active) {
+          if (!this.fireMesh) {
+              const geo = new THREE.BoxGeometry(0.6, 1.8, 0.6);
+              const mat = new THREE.MeshBasicMaterial({ color: 0xff4500, transparent: true, opacity: 0.5 });
+              this.fireMesh = new THREE.Mesh(geo, mat);
+              this.fireMesh.position.y = 0.9;
+              this.mesh.add(this.fireMesh);
+          }
+      } else {
+          if (this.fireMesh) {
+              this.mesh.remove(this.fireMesh);
+              this.fireMesh.geometry.dispose();
+              (this.fireMesh.material as THREE.Material).dispose();
+              this.fireMesh = null;
+          }
+      }
+  }
+
+  public takeDamage(amount: number, attackerPos: THREE.Vector3 | null) {
     if (this.isDead || this.isHurt) return;
     
     this.hp -= amount;
@@ -124,28 +125,43 @@ export class Mob {
     }, 500);
 
     // Knockback
-    const knockbackDir = this.mesh.position.clone().sub(attackerPos).normalize();
-    knockbackDir.y = 0.4; // Slightly upward
-    knockbackDir.normalize();
-    
-    // Apply impulse
-    // We want it to fly ~1.5 blocks. With friction ~5.0, initial V should be around 8-10.
-    this.velocity.add(knockbackDir.multiplyScalar(8.0));
-    this.isOnGround = false;
+    if (attackerPos) {
+        const knockbackDir = this.mesh.position.clone().sub(attackerPos).normalize();
+        knockbackDir.y = 0.4; // Slightly upward
+        knockbackDir.normalize();
+        this.velocity.add(knockbackDir.multiplyScalar(8.0));
+        this.isOnGround = false;
+    }
 
     if (this.hp <= 0) {
       this.isDead = true;
+      this.setFire(false); // Extinguish on death
     }
   }
 
-  update(delta: number, playerPos?: THREE.Vector3, onAttack?: (damage: number) => void) {
+  update(delta: number, playerPos?: THREE.Vector3, onAttack?: (damage: number) => void, isDay?: boolean) {
     if (!this.isHurt) {
-        this.updateAI(delta, playerPos, onAttack);
+        this.updateAI(delta, playerPos, onAttack, isDay);
     }
+    
+    // Fire Damage
+    if (this.isOnFire) {
+        this.fireTimer += delta;
+        // 2 damage per second -> 1 damage every 0.5s
+        if (this.fireTimer >= 0.5) {
+            this.fireTimer = 0;
+            this.takeDamage(1, null); // No attacker
+        }
+        
+        if (this.fireMesh) {
+            this.fireMesh.scale.setScalar(1.0 + Math.random() * 0.1);
+        }
+    }
+    
     this.updatePhysics(delta);
   }
 
-  protected updateAI(delta: number, _playerPos?: THREE.Vector3, _onAttack?: (damage: number) => void) {
+  protected updateAI(delta: number, _playerPos?: THREE.Vector3, _onAttack?: (damage: number) => void, _isDay?: boolean) {
     if (this.state === MobState.IDLE) {
       // 1% chance per frame (assuming 60fps)
       if (Math.random() < 0.01) {
