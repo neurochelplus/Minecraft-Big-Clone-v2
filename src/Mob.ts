@@ -37,6 +37,7 @@ export class Mob {
   public maxHp = 20;
   public isDead = false;
   public isHurt = false;
+  public isStunned = false;
   
   // Fire
   public isOnFire = false;
@@ -102,6 +103,9 @@ export class Mob {
     
     this.hp -= amount;
     this.isHurt = true;
+    if (attackerPos) {
+        this.isStunned = true;
+    }
     
     // Red Flash Effect (persistent for 0.5s)
     this.mesh.traverse((child) => {
@@ -115,6 +119,7 @@ export class Mob {
 
     setTimeout(() => {
         this.isHurt = false;
+        this.isStunned = false;
         if (!this.isDead) {
             this.mesh.traverse((child) => {
                 if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial && child.userData.originalColor) {
@@ -140,7 +145,7 @@ export class Mob {
   }
 
   update(delta: number, playerPos?: THREE.Vector3, onAttack?: (damage: number) => void, isDay?: boolean) {
-    if (!this.isHurt) {
+    if (!this.isStunned) {
         this.updateAI(delta, playerPos, onAttack, isDay);
     }
     
