@@ -3,7 +3,7 @@ import { createNoise2D } from 'simplex-noise';
 import { worldDB } from './DB';
 
 // Block IDs
-const BLOCK = {
+export const BLOCK = {
   AIR: 0,
   GRASS: 1,
   DIRT: 2,
@@ -310,6 +310,18 @@ export class World {
 
     const index = this.getBlockIndex(localX, localY, localZ);
     return data[index] !== BLOCK.AIR;
+  }
+
+  public getBreakTime(type: number): number {
+    switch (type) {
+        case BLOCK.LEAVES: return 1000;
+        case BLOCK.DIRT:
+        case BLOCK.GRASS: return 3000;
+        case BLOCK.WOOD: return 5000;
+        case BLOCK.STONE: return 20000;
+        case BLOCK.BEDROCK: return Infinity;
+        default: return 1000;
+    }
   }
 
   public getBlock(x: number, y: number, z: number): number {

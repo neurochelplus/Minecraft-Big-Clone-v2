@@ -459,6 +459,155 @@ const cursorMesh = new THREE.Mesh(cursorGeometry, cursorMaterial);
 cursorMesh.visible = false;
 scene.add(cursorMesh);
 
+// --- Block Breaking System ---
+
+// 1. Generate Crack Textures (Atlas)
+// We'll create a 10-frame atlas on a canvas
+const crackCanvas = document.createElement('canvas');
+crackCanvas.width = 640; // 10 frames * 64px
+crackCanvas.height = 64;
+const crackCtx = crackCanvas.getContext('2d')!;
+
+// Disable smoothing for pixelated look
+crackCtx.imageSmoothingEnabled = false;
+
+for (let i = 0; i < 10; i++) {
+    const offsetX = i * 64;
+    const centerX = 32;
+    const centerY = 32;
+    
+    // Percent based on frame (0.1 to 1.0)
+    const progress = (i + 1) / 10;
+    const maxDist = 32 * 1.2; // Cover corners
+    const currentDist = maxDist * progress;
+    
+    // Pixelate: Loop 4x4 pixel blocks (16x16 grid for 64x64 texture)
+    const pixelSize = 4; 
+    
+    for (let x = 0; x < 64; x += pixelSize) {
+        for (let y = 0; y < 64; y += pixelSize) {
+            const dx = x + pixelSize/2 - centerX;
+            const dy = y + pixelSize/2 - centerY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            // Add some noise to the edge
+            const noise = (Math.random() - 0.5) * 10;
+            
+            if (dist < currentDist + noise) {
+                crackCtx.fillStyle = 'rgba(0, 0, 0, 0.7)'; // Semi-transparent black
+                crackCtx.fillRect(offsetX + x, y, pixelSize, pixelSize);
+            }
+        }
+    }
+}
+
+const crackTexture = new THREE.CanvasTexture(crackCanvas);
+crackTexture.magFilter = THREE.NearestFilter;
+crackTexture.minFilter = THREE.NearestFilter;
+// We need to show only 1/10th of the texture
+crackTexture.repeat.set(0.1, 1);
+
+const crackGeometry = new THREE.BoxGeometry(1.002, 1.002, 1.002);
+const crackMaterial = new THREE.MeshBasicMaterial({ 
+    map: crackTexture,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -4 // Push towards camera significantly
+});
+const crackMesh = new THREE.Mesh(crackGeometry, crackMaterial);
+crackMesh.visible = false;
+crackMesh.renderOrder = 999; // Render last (on top of blocks)
+scene.add(crackMesh);
+
+// State
+let isBreaking = false;
+let breakStartTime = 0;
+let currentBreakBlock = new THREE.Vector3();
+let currentBreakId = 0;
+
+function updateBreaking(time: number) {
+    if (!isBreaking) {
+        crackMesh.visible = false;
+        return;
+    }
+
+    // Raycast to check if still looking at same block
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const hit = raycaster.intersectObjects(scene.children).find(i => i.object !== cursorMesh && i.object !== crackMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
+    
+    let lookingAtSame = false;
+    if (hit && hit.distance < 6) {
+        const p = hit.point.clone().add(raycaster.ray.direction.clone().multiplyScalar(0.1));
+        const x = Math.floor(p.x);
+        const y = Math.floor(p.y);
+        const z = Math.floor(p.z);
+        
+        if (x === currentBreakBlock.x && y === currentBreakBlock.y && z === currentBreakBlock.z) {
+            lookingAtSame = true;
+        }
+    }
+
+    if (!lookingAtSame) {
+        // Stop breaking if looked away
+        isBreaking = false;
+        crackMesh.visible = false;
+        return;
+    }
+
+    // Update Progress
+    const duration = world.getBreakTime(currentBreakId);
+    const elapsed = time - breakStartTime;
+    const progress = Math.min(elapsed / duration, 1.0);
+
+    if (progress >= 1.0) {
+        // Break it!
+        const x = currentBreakBlock.x;
+        const y = currentBreakBlock.y;
+        const z = currentBreakBlock.z;
+        
+        // Drop Item
+        if (currentBreakId !== 0) {
+            entities.push(new ItemEntity(world, scene, x, y, z, currentBreakId, world.noiseTexture));
+        }
+        
+        world.setBlock(x, y, z, 0); // AIR
+        
+        // Reset
+        isBreaking = false;
+        crackMesh.visible = false;
+    } else {
+        // Update Visuals
+        crackMesh.visible = true;
+        crackMesh.position.set(currentBreakBlock.x + 0.5, currentBreakBlock.y + 0.5, currentBreakBlock.z + 0.5);
+        
+        // Select frame 0-9
+        const frame = Math.floor(progress * 9);
+        crackTexture.offset.x = frame * 0.1;
+    }
+}
+
+function startBreaking() {
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const hit = raycaster.intersectObjects(scene.children).find(i => i.object !== cursorMesh && i.object !== crackMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
+
+    if (hit && hit.distance < 6) {
+      const p = hit.point.clone().add(raycaster.ray.direction.clone().multiplyScalar(0.1));
+      const x = Math.floor(p.x);
+      const y = Math.floor(p.y);
+      const z = Math.floor(p.z);
+      
+      const id = world.getBlock(x, y, z);
+      if (id !== 0 && id !== 4) { // Not Air or Bedrock
+          isBreaking = true;
+          breakStartTime = performance.now();
+          currentBreakBlock.set(x, y, z);
+          currentBreakId = id;
+      }
+    }
+}
+
 // Player Health System
 let playerHP = 20;
 let isInvulnerable = false;
@@ -573,29 +722,12 @@ function performAttack() {
              return; // Don't break blocks if we hit a mob
          }
      }
-  
-    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-    const hit = raycaster.intersectObjects(scene.children).find(i => i.object !== cursorMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
-
-    if (hit && hit.distance < 6) {
-      // Break Block
-      const p = hit.point.clone().add(raycaster.ray.direction.clone().multiplyScalar(0.1));
-      const x = Math.floor(p.x);
-      const y = Math.floor(p.y);
-      const z = Math.floor(p.z);
-      
-      const blockId = world.getBlock(x, y, z);
-      if (blockId !== 0) {
-        entities.push(new ItemEntity(world, scene, x, y, z, blockId, world.noiseTexture));
-        world.setBlock(x, y, z, 0); // AIR
-      }
-    }
 }
 
 function performInteract() {
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
   const intersects = raycaster.intersectObjects(scene.children);
-  const hit = intersects.find(i => i.object !== cursorMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
+  const hit = intersects.find(i => i.object !== cursorMesh && i.object !== crackMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
 
   if (hit && hit.distance < 6) {
       // Place Block
@@ -626,8 +758,16 @@ document.addEventListener('mousedown', (event) => {
   if (!controls.isLocked && !isMobile) return;
   if (isInventoryOpen) return;
   
-  if (event.button === 0) performAttack();
+  if (event.button === 0) {
+      performAttack(); // Hit mobs
+      startBreaking(); // Start mining block
+  }
   else if (event.button === 2) performInteract();
+});
+
+document.addEventListener('mouseup', () => {
+   isBreaking = false;
+   crackMesh.visible = false;
 });
 
 const playerHalfWidth = 0.3;
@@ -698,6 +838,8 @@ function animate() {
 
   environment.update(delta, controls.object.position);
   
+  updateBreaking(time);
+  
   // Update Entities & Pickup
   for (let i = entities.length - 1; i >= 0; i--) {
     const entity = entities[i];
@@ -750,13 +892,19 @@ function animate() {
     const hit = intersects.find(i => i.object !== cursorMesh && i.object !== controls.object && (i.object as any).isMesh && !(i.object as any).isItem && !(i.object.parent as any)?.isMob);
 
     if (hit && hit.distance < 6) {
-      cursorMesh.visible = true;
       const p = hit.point.clone().add(raycaster.ray.direction.clone().multiplyScalar(0.1));
-      cursorMesh.position.set(
-        Math.floor(p.x) + 0.5,
-        Math.floor(p.y) + 0.5,
-        Math.floor(p.z) + 0.5
-      );
+      const x = Math.floor(p.x);
+      const y = Math.floor(p.y);
+      const z = Math.floor(p.z);
+      
+      const id = world.getBlock(x, y, z);
+      
+      if (id !== 0) {
+          cursorMesh.visible = true;
+          cursorMesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+      } else {
+          cursorMesh.visible = false;
+      }
     } else {
       cursorMesh.visible = false;
     }
@@ -1061,17 +1209,75 @@ if (isMobile) {
 
 
 
-  document.getElementById('btn-attack')!.addEventListener('touchstart', (e) => {
-
-    e.preventDefault();
-
-    performAttack();
-
-  });
+    document.getElementById('btn-attack')!.addEventListener('touchstart', (e) => {
 
 
 
-  document.getElementById('btn-place')!.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+
+
+
+      performAttack();
+
+
+
+      startBreaking();
+
+
+
+    });
+
+
+
+  
+
+
+
+    const stopBreakingMobile = (e: TouchEvent) => {
+
+
+
+        e.preventDefault();
+
+
+
+        isBreaking = false;
+
+
+
+        crackMesh.visible = false;
+
+
+
+    };
+
+
+
+  
+
+
+
+    document.getElementById('btn-attack')!.addEventListener('touchend', stopBreakingMobile);
+
+
+
+    document.getElementById('btn-attack')!.addEventListener('touchcancel', stopBreakingMobile);
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+    document.getElementById('btn-place')!.addEventListener('touchstart', (e) => {
 
     e.preventDefault();
 
